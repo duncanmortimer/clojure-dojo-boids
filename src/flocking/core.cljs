@@ -33,8 +33,8 @@
   (rc/render-component [flock-debug]
                        (.-body js/document)))
 
-(def cm-coeff 100.0)
-(def avoid-coeff -50.0)
+(def cm-coeff 0.001)
+(def avoid-coeff -1.0)
 
 (defn centre-of-mass
   [boids]
@@ -47,8 +47,8 @@
   [boid cm]
   (let [dx (- (:x boid) (:x cm))
         dy (- (:y boid) (:y cm))
-        newx (+ (:x boid) (/ dx cm-coeff))
-        newy (+ (:y boid) (/ dy cm-coeff))]
+        newx (+ (:x boid) (* dx cm-coeff))
+        newy (+ (:y boid) (* dy cm-coeff))]
     (assoc boid :x newx :y newy)))
 
 (defn avoid-a-random
@@ -56,14 +56,15 @@
   (let [other-boid (rand-nth boids)
         dx (- (:x boid) (:x other-boid))
         dy (- (:y boid) (:y other-boid))
-        newx (+ (:x boid) (/ dx avoid-coeff))
-        newy (+ (:y boid) (/ dy avoid-coeff))
+        newx (+ (:x boid) (* dx avoid-coeff))
+        newy (+ (:y boid) (* dy avoid-coeff))
         ]
     (assoc boid :x newx :y newy)))
 
 (defn update-boids
   [boids]
   (let [cm (centre-of-mass boids)
+        _ (println cm)
         cm-boids (mapv (partial boid-to-cm cm) boids)
         avoid-boids (mapv (partial avoid-a-random cm-boids) cm-boids)
     ]
