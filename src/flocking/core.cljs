@@ -7,9 +7,6 @@
 
 (def ranges {:x 640 :y 480 :vx [-10 10] :vy [-10 10]})
 
-(defonce boids (rc/atom nil))
-(defonce config (rc/atom {:ps 1 :vs 10}))
-
 (defn rand-int-between [[l h]]
   (+ (rand-int (- h l)) l))
 
@@ -27,12 +24,12 @@
   (reset! boid-atom (doall (take n (repeatedly random-boid)))))
 
 ;; some debugging stuff
-(defn flock-debug []
+(defn flock-debug [boids-atom]
   [:ul
-   (map (fn [b] [:li (str b)]) @boids)])
+   (map (fn [b] [:li (str b)]) @boids-atom)])
 
-(defn mount-debug []
-  (rc/render-component [flock-debug]
+(defn mount-debug [boids-atom]
+  (rc/render-component [flock-debug boids-atom]
                        (.-body js/document)))
 
 ;; simulation
@@ -102,8 +99,8 @@
                     (mapv update-position))]
     boids'))
 
-(defn run []
-  (js/setInterval #(swap! boids update-boids) 100))
+(defn run [boids-atom]
+  (js/setInterval #(swap! boids-atom update-boids) 100))
 
 ;; rendering
 (defn render-boid [coord-scale velocity-scale]
@@ -121,13 +118,33 @@
   (let [boids @boids-atom
         {ps :ps vs :vs} @config-atom]
     [:svg {:height 480 :width 640}
-     (map #(vector (render-boid ps vs) %) boids)]))
+     (for [boid boids]
+       ^{:key boid} [(render-boid ps vs) boid])]))
 
-(defn list-render-flock [boids-atom]
-  (let [boids @boids-atom]
-    [:ul
-     (map #(vector :li (str %)) boids)]))
-
-(defn mountit []
-  (rc/render-component [render-flock boids config]
+(defn mountit [boids-atom config-atom]
+  (rc/render-component [render-flock boids-atom config-atom]
                        (.-body js/document)))
+
+;; start everything up
+(defonce config (rc/atom {:ps 1 :vs 10}))
+(defonce boids (rc/atom nil))
+(defonce simulation (rc/atom nil))
+
+(defn start []
+  (when-not @simulation
+    (reset! simulation (run boids))))
+
+(defn stop []
+  (when @simulation
+    (swap! simulation js/clearInterval)))
+
+(defn begin
+  ([] (begin 100))
+
+  ([n]
+   (when @simulation
+     (stop))
+   (init-boids n boids)
+   (mountit boids config)
+   (start)))
+
