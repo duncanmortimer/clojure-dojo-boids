@@ -35,7 +35,8 @@
 
 ;; simulation
 (def cohesion-coeff -0.9)
-(def separation-coeff 0.5)
+(def separation-coeff 0.03)
+(def separation-neighbourhood 4)
 (def alignment-coeff 0.15)
 (def alignment-neighbourhood 4)
 
@@ -59,20 +60,22 @@
 
 (defn separation-force
   [tree boid]
-  (let [neighbour (:point (second (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] 2)))
-        dx (- (:x boid) (first neighbour))
-        dy (- (:y boid) (second neighbour))
+  (let [neighbours (mapv :point (rest (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] separation-neighbourhood)))
+        xf (/ (reduce + (mapv first neighbours)) (- separation-neighbourhood 1))
+        yf (/ (reduce + (mapv second neighbours)) (- separation-neighbourhood 1))
+        dx (- (:x boid) xf)
+        dy (- (:y boid) yf)
         fx (* dx separation-coeff)
         fy (* dy separation-coeff)]
     {:fx fx :fy fy}))
 
 (defn alignment-force
   [tree boid]
-  (let [neighbours (mapv :point (rest (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] alignment-neighbourhood)))
-        dx (/ (reduce + (mapv (:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
-        dy (/ (reduce + (mapv (:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
-        fx (* dx alignment-coeff)
-        fy (* dy alignment-coeff)]
+  (let [neighbours (rest (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] alignment-neighbourhood))
+        vxf (/ (reduce + (mapv #(:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
+        vyf (/ (reduce + (mapv #(:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
+        fx (* (- vxf (:vx boid)) alignment-coeff)
+        fy (* (- vyf (:vy boid)) alignment-coeff)]
     {:fx fx :fy fy}))
 
 (defn total-force
@@ -159,7 +162,7 @@
     (swap! simulation js/clearInterval)))
 
 (defn begin
-  ([] (begin 20))
+  ([] (begin 50))
 
   ([n]
    (when @simulation
@@ -167,3 +170,5 @@
    (init-boids n boids)
    (mountit boids config)
    (start)))
+
+(begin)
