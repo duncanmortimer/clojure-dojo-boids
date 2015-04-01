@@ -9,7 +9,7 @@ Then in the repl:
 
 ```
 > (ns flocking.core)
-> (begin 100)
+> (begin 20)
 ```
 
 and enjoy.

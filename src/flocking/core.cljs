@@ -1,11 +1,12 @@
 (ns ^:figwheel-always flocking.core
-  (:require [reagent.core :as rc]))
+  (:require [reagent.core :as rc]
+            [flocking.kdtree :as kdtree]))
 
 (enable-console-print!)
 
 ;; Initialise
 
-(def ranges {:x 640 :y 480 :vx [-10 10] :vy [-10 10]})
+(def ranges {:x 640 :y 480 :vx [-5 5] :vy [-5 5]})
 
 (defn rand-int-between [[l h]]
   (+ (rand-int (- h l)) l))
@@ -33,10 +34,10 @@
                        (.-body js/document)))
 
 ;; simulation
-(def cm-coeff -0.9)
-(def avoid-coeff 0.5)
-(def damping-coeff 0.1)
-(def force-coupling 0.1)
+(def cohesion-coeff -0.9)
+(def separation-coeff 0.5)
+(def alignment-coeff 0.15)
+(def alignment-neighbourhood 4)
 
 (defn centre-of-mass
   [boids]
@@ -45,62 +46,81 @@
         sy (reduce + (mapv :y boids))]
     {:x (/ sx n) :y (/ sy n)}))
 
-(defn boid-to-cm
+(defn cohesion-force
   [cm boid]
   (let [dx (- (:x boid) (:x cm))
         dy (- (:y boid) (:y cm))
         s (Math/sqrt (+ (* dx dx) (* dy dy)))
         ux (/ dx s)
         uy (/ dy s)
-        fx (* ux cm-coeff)
-        fy (* uy cm-coeff)]
-    (assoc boid :fx fx :fy fy)))
+        fx (* ux cohesion-coeff)
+        fy (* uy cohesion-coeff)]
+    {:fx fx :fy fy}))
 
-(defn avoid-a-random
-  [boids boid]
-  (let [other-boid (rand-nth boids)]
-    (if (and (= (:x boid) (:x other-boid))
-             (= (:y boid) (:y other-boid)))
-      boid
-      (let [dx (- (:x boid) (:x other-boid))
-            dy (- (:y boid) (:y other-boid))
-            s (Math/sqrt (+ (* dx dx) (* dy dy)))
-            ux (/ dx s)
-            uy (/ dy s)
-            fx (/ (* ux avoid-coeff) s)
-            fy (/ (* uy avoid-coeff) s)]
-        (-> boid
-            (update-in [:fx] (partial + fx))
-            (update-in [:fy] (partial + fy)))))))
+(defn separation-force
+  [tree boid]
+  (let [neighbour (:point (second (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] 2)))
+        dx (- (:x boid) (first neighbour))
+        dy (- (:y boid) (second neighbour))
+        fx (* dx separation-coeff)
+        fy (* dy separation-coeff)]
+    {:fx fx :fy fy}))
 
-(defn damping [{:keys [vx vy] :as boid}]
-  (-> boid
-      (update-in [:fx] (partial + (* damping-coeff (- 0 vx))))
-      (update-in [:fy] (partial + (* damping-coeff (- 0 vy))))))
+(defn alignment-force
+  [tree boid]
+  (let [neighbours (mapv :point (rest (kdtree/nearest-neighbor tree [(:x boid) (:y boid)] alignment-neighbourhood)))
+        dx (/ (reduce + (mapv (:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
+        dy (/ (reduce + (mapv (:vx (:boid (meta %))) neighbours)) (- alignment-neighbourhood 1))
+        fx (* dx alignment-coeff)
+        fy (* dy alignment-coeff)]
+    {:fx fx :fy fy}))
 
-(defn update-velocity [{:keys [vx vy fx fy] :as boid}]
-  (assoc boid
-         :vx (+ vx (* force-coupling fx))
-         :vy (+ vy (* force-coupling fy))))
+(defn total-force
+  [cm tree boid]
+  (let [forces ((juxt (partial cohesion-force cm)
+                      (partial separation-force tree)
+                      (partial alignment-force tree)
+                      )
+                 boid)
+        fx (reduce + (mapv :fx forces))
+        fy (reduce + (mapv :fy forces))]
+    {:fx fx :fy fy}))
+
+(defn calculate-forces
+  [boids]
+  (let [cm (centre-of-mass boids)
+        tree (kdtree/build-tree (mapv (fn [b] (with-meta [(:x b) (:y b)] {:boid b})) boids))]
+    (mapv (partial total-force cm tree) boids)))
+
+(defn limit
+  [v m]
+  (cond
+    (> v m) m
+    (< v (* -1.0 m)) (* -1.0 m)
+    true v))
+
+(defn update-velocity [force boid]
+  (let [{vx :vx vy :vy} boid
+        {fx :fx fy :fy} force]
+    (assoc boid
+      :vx (limit (+ vx fx) 10.0)
+      :vy (limit (+ vy fy) 10.0))))
 
 (defn update-position [{:keys [x y vx vy] :as boid}]
   (assoc boid
-         :x (+ x vx)
-         :y (+ y vy)))
+    :x (mod (+ x vx) (:x ranges))
+    :y (mod (+ y vy) (:y ranges))))
 
 (defn update-boids
   [boids]
-  (let [cm (centre-of-mass boids)
+  (let [forces (calculate-forces boids)
         boids' (->> boids
-                    (mapv (partial boid-to-cm cm))
-                    (mapv (partial avoid-a-random boids))
-                    (mapv damping)
-                    (mapv update-velocity)
+                    (mapv update-velocity forces)
                     (mapv update-position))]
     boids'))
 
 (defn run [boids-atom]
-  (js/setInterval #(swap! boids-atom update-boids) 100))
+  (js/setInterval #(swap! boids-atom update-boids) 20))
 
 ;; rendering
 (defn render-boid [coord-scale velocity-scale]
@@ -126,7 +146,7 @@
                        (.-body js/document)))
 
 ;; start everything up
-(defonce config (rc/atom {:ps 1 :vs 10}))
+(defonce config (rc/atom {:ps 1 :vs 2}))
 (defonce boids (rc/atom nil))
 (defonce simulation (rc/atom nil))
 
@@ -139,7 +159,7 @@
     (swap! simulation js/clearInterval)))
 
 (defn begin
-  ([] (begin 100))
+  ([] (begin 20))
 
   ([n]
    (when @simulation
@@ -147,4 +167,3 @@
    (init-boids n boids)
    (mountit boids config)
    (start)))
-
